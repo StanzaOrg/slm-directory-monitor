@@ -1,0 +1,189 @@
+#use-added-syntax(tests)
+defpackage directory-monitor :
+  import core
+  import core/parsed-path
+
+; Call to C functions.
+; Note that the init call will result in dynamic memory allocation
+; If the check result is true. The recent state is captured for the next check.
+; The user is required to call -uninit to free allocated memory in C
+extern directory_monitor_init: (ptr<byte>, int, int) -> ptr<?>
+extern directory_monitor_check: (ptr<?>) -> ptr<byte>
+extern directory_monitor_uninit: (ptr<?>) -> int
+
+lostanza deftype LoDirectoryMonitorContext :
+  ctx : ptr<?>
+
+lostanza defn lo-directory-monitor-init (p:ref<String>, recurse?:ref<True|False>, add-entries?:ref<True|False>) -> ref<False|LoDirectoryMonitorContext> :
+  var is-recurse:int = 0
+  var is-add-entries:int = 0
+  if recurse? == true : is-recurse = 1
+  if add-entries? == true : is-add-entries = 1
+  val res = call-c directory_monitor_init(addr!(p.chars), is-recurse, is-add-entries)
+  if res == null :
+    return false
+  else :
+    return new LoDirectoryMonitorContext{res}
+
+lostanza defn lo-directory-monitor-check (d:ref<LoDirectoryMonitorContext>) -> ref<String|False> :
+  val res = call-c directory_monitor_check(d.ctx)
+  if res != null :
+    val s = String(res)
+    call-c clib/free(res)
+    return s
+  else :
+    return false
+
+lostanza defn lo-directory-monitor-uninit (d:ref<LoDirectoryMonitorContext>) -> ref<False> :
+  call-c directory_monitor_uninit(d.ctx)
+  return false
+
+; =================================
+; ===== DirectoryMonitor ==========
+; =================================
+; HiStanza public interface
+
+doc: \<internal>
+Usage:
+* call DirectoryMonitor with a directory in absolute path and whether recurse? into sub-folder
+* If it is not a False, use its functions
+  * check -- to check if the directory has changed.
+             returns  One(String) if the directory has changed since last check. String is the file changed.
+                                  if Tuple<filenames> is not empty, the changed file will be reported only if
+                                    its name is in the Tuple.
+                                  if Tuple<filename> is emtpry, all changes will be reported.
+                                  if the change comes from the directory itself, it will always be reported.
+                      One(False) if the directory has not changed. Continue to check.
+                      None() if the path is wrong or DirectoryMonitor is destroy-ed.
+  * destroy -- to destroy the DirectoryMonitor to prevent memory leak.
+               (NB. It is no harm to call destroy more than once
+                    since double-free is prevented inside DirectoryMonitor)
+<internal>
+public deftype DirectoryMonitor
+public defmulti path (d:DirectoryMonitor) -> String
+public defmulti check (d:DirectoryMonitor) -> Maybe<String|False>
+public defmulti destroy (d:DirectoryMonitor) -> False
+public defmulti rearm (d:DirectoryMonitor) -> False
+public defn DirectoryMonitor (path:String, filenames:Tuple<String>, recurse?:True|False = false) -> DirectoryMonitor :
+  var ctx?:False|LoDirectoryMonitorContext = lo-directory-monitor-init(path, recurse?, true)
+  new DirectoryMonitor :
+    defmethod path (this) :
+      path
+    defmethod check (this) :
+      match(ctx?) :
+        (ctx:LoDirectoryMonitorContext) :
+          One $ let loop () :
+            match(lo-directory-monitor-check(ctx)) :
+              (chk:String) :
+                if chk == path :
+                  ; target directory is destroyed. Re-run
+                  destroy(this)
+                  chk
+                else :
+                  val path = entries(parse-path(chk))
+                  val last = match(path[length(path) - 1]) :
+                    (np:NamedPath) : name(np)
+                    (_) : false
+                  if not empty?(filenames) :
+                    if contains?(filenames, last) :
+                      chk
+                    else :
+                      loop()
+                  else :
+                    chk
+              (_) : false
+        (f:False) :
+          ; Unsuccessful initialization in the past. Try again.
+          ctx? = lo-directory-monitor-init(path, recurse?, false)
+          match(ctx?) :
+            (ctx:LoDirectoryMonitorContext) : One(path) ; this is a change
+            (_) : None()
+    defmethod destroy (this) :
+      match(ctx?) :
+        (ctx:LoDirectoryMonitorContext) :
+          lo-directory-monitor-uninit(ctx)
+          ctx? = false
+          false
+        (f:False) : false
+    defmethod rearm (this) :
+      match(ctx?:LoDirectoryMonitorContext) :
+        destroy(this)
+      ctx? = lo-directory-monitor-init(path, recurse?, true)
+      false
+
+; =======================
+; ===== Unit Tester =====
+; =======================
+;deftest directory :
+;  defn test-driver (path:String, filenames:Tuple<String>, time-in-sec:Int) -> True|False :
+;    val SLEEP-TIME = 500L
+;    var change-counter:Int = 10
+;    var loop-counter:Int = to-int(to-long(time-in-sec) * 1000L / SLEEP-TIME)
+;    println("It will not quit until the %_ %_ is/are changed %_ times or checked %_ times"
+;            % [path filenames change-counter loop-counter])
+;    val dm = DirectoryMonitor(path, filenames, true)
+;    let loop () :
+;      loop-counter = loop-counter - 1
+;      if loop-counter < 0 :
+;        println("Timed Out! change-count = %_" % [change-counter])
+;        destroy(dm)
+;      else :
+;        val chk = check(dm)
+;        if not empty?(chk) :
+;          match(value!(chk)) :
+;            (str:String) :
+;              change-counter = change-counter - 1
+;              println("%_ is changed. %_ time(s) to go." % [str change-counter])
+;              if change-counter <= 0 :
+;                println("Quit.")
+;                destroy(dm)
+;              else :
+;                ;rearm(dm)
+;                sleep-ms(SLEEP-TIME)
+;                loop()
+;            (_) :
+;              sleep-ms(SLEEP-TIME)
+;              loop()
+;        else :
+;          println("Not Ready!")
+;          sleep-ms(SLEEP-TIME)
+;          loop()
+;    true
+;  ; STOP! Obviously these directory settings below only work in my local machine.
+;  ; Change to something that works for you!
+;  #if-defined(PLATFORM-LINUX) :
+;    #EXPECT(test-driver("/home/erwin/pic-programmer",  ["debug-usb3.stanza"], 30))
+;    #EXPECT(test-driver("/home/erwin/nonexist", [], 30))
+;  #if-defined(PLATFORM-OS-X) :
+;    #EXPECT(test-driver("/Users/erwin/pic-programmer",  ["debug-usb3.stanza"], 30))
+;    #EXPECT(test-driver("/Users/erwin/nonexist", [], 30))
+;  #if-defined(PLATFORM-WINDOWS) :
+;    #EXPECT(test-driver("c:\\density" [], 30))
+;
+deftest removed-file :
+  val dm = DirectoryMonitor("nonexist", [], true)
+  defn check-dm () :
+    let loop () :
+      val chk = check(dm)
+      if not empty?(chk) :
+        match(value!(chk)) :
+          (s:String) :
+            println("%_ has changed" % [s])
+            loop()
+          (_) : false
+  println("before mkdir nonexist")
+  call-system("mkdir", ["mkdir" "nonexist"])
+  check-dm()
+  println("before mkdir abc")
+  call-system("mkdir", ["mkdir" "nonexist/abc"])
+  check-dm()
+  println("before mkdir def")
+  call-system("mkdir", ["mkdir" "nonexist/abc/def"])
+  check-dm()
+  println("before touch xyz")
+  call-system("touch", ["touch" "nonexist/abc/def/xyz"])
+  check-dm()
+  println("before rm nonexist")
+  call-system("rm", ["rm" "-rf" "nonexist"])
+  check-dm()
+  #ASSERT(true)

@@ -1,0 +1,6 @@
+defpackage directory-monitor/tests :
+  import core
+  import directory-monitor
+
+defn go () :
+  DirectoryMonitor(".", [], false)

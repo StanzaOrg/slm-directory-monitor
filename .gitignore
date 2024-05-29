@@ -1,0 +1,7 @@
+.slm
+*.tgz
+lib/
+build/
+slm-directory-monitor-tests
+
+

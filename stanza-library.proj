@@ -1,0 +1,12 @@
+compile flag "-lstz-directory-monitor-boost" :
+  on-platform :
+    linux :
+      "mkdir -p '{.}/lib'"
+      "cc -fPIC -rdynamic -shared -DPLATFORM_LINUX '-I{.}/.slm/deps/boost/include' '-L{.}/.slm/deps/boost/lib' '-lboost_filesystem' '{.}/src/simple-ws-server.c' -o '{.}/lib/libstz-websockets-server.so'"
+    os-x :
+      "mkdir -p '{.}/lib'"
+      "cc -v -fPIC -rdynamic -shared -DPLATFORM_OS_X -std=c++11 '-I{STANZA_DIR}/include' '-I{.}/.slm/deps/boost/include' '-L{.}/.slm/deps/boost/lib' '-lboost_filesystem' '{.}/src/directory-monitor-boost.cpp' -o '{.}/lib/libstz-directory-monitor-boost.dylib'"
+    windows :
+      "mkdir {.}\\lib"
+      "gcc -Wl,--export-all-symbols -shared -DPLATFORM_WINDOWS '-I{STANZA_DIR}/include' '-I{.}/.slm/deps/libwebsockets/include' '-L{.}/.slm/deps/libwebsockets/lib' '-lwebsockets' '{.}/src/simple-ws-server.c' -o '{.}/lib/libstz-websockets-server.dll'"
+
