@@ -3,5 +3,4 @@
 lib/
 build/
 slm-directory-monitor-tests
-
-
+slm-directory-monitor

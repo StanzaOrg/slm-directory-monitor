@@ -8,4 +8,4 @@ compile flag "-lstz-directory-monitor-boost" :
       "cc -fPIC -rdynamic -shared -DPLATFORM_OS_X -std=c++11 '-I{STANZA_DIR}/include' '-I{.}/.slm/deps/boost/include' '-L{.}/.slm/deps/boost/lib' '-lboost_filesystem' '{.}/src/directory-monitor-boost.cpp' -o '{.}/lib/libstz-directory-monitor-boost.dylib'"
     windows :
       "mkdir {.}\\lib"
-      "gcc -Wl,--export-all-symbols -shared -DPLATFORM_WINDOWS -std=c++11 '-I{STANZA_DIR}/include' '-I{.}/.slm/deps/boost/include' '-L{.}/.slm/deps/boost/lib' '-lboost_filesystem' '{.}/src/directory-monitor-boost.cpp' -o '{.}/lib/libstz-websockets-server.dll'"
+      "gcc -Wl,--export-all-symbols -shared -DPLATFORM_WINDOWS -std=c++11 '-I{STANZA_DIR}\\include' '-I{.}\\.slm\\deps\\boost\\include' '-L{.}\\.slm\\deps\\boost\\lib' '-lboost_filesystem' '{.}\\src\\directory-monitor-boost.cpp' -o '{.}\\lib\\libstz-websockets-server.dll'"
